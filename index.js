@@ -1,5 +1,6 @@
 const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 const fetch = require("node-fetch");
+const crypto = require("crypto");
 
 const manifest = {
     id: "org.mytorrents.sheet",
@@ -14,8 +15,7 @@ const manifest = {
         }
     ],
     resources: ["catalog", "stream"],
-    types: ["movie"],
-    idPrefixes: ["torrent"]
+    types: ["movie"]
 };
 
 // 👇 replace with your Google Sheet JSON URL
@@ -26,27 +26,43 @@ async function getTorrents() {
     return res.json();
 }
 
+// generate unique id from magnet link
+function generateId(url) {
+    return crypto.createHash("md5").update(url).digest("hex");
+}
+
 const builder = new addonBuilder(manifest);
 
+// Catalog handler
 builder.defineCatalogHandler(async () => {
     const torrents = await getTorrents();
     return {
         metas: torrents.map(t => ({
-            id: t.id || t.name,  // fallback to name if no id
+            id: generateId(t.url),  // unique id from magnet
             name: t.name,
             type: "movie"
         }))
     };
 });
 
+// Stream handler
 builder.defineStreamHandler(async ({ id }) => {
     const torrents = await getTorrents();
-    const item = torrents.find(t => (t.id || t.name) === id);
-    if (!item) return { streams: [] };
+    const item = torrents.find(t => generateId(t.url) === id);
+    if (!item) {
+        console.log("Stream not found for id:", id);
+        return { streams: [] };
+    }
+
     return {
-        streams: [{ title: item.name, url: item.url }]
+        streams: [
+            {
+                title: item.name,
+                url: item.url
+            }
+        ]
     };
 });
 
-// 👇 This actually starts the HTTP server
+// start server
 serveHTTP(builder.getInterface(), { port: process.env.PORT || 7000 });
